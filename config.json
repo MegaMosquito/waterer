@@ -1,0 +1,11 @@
+{
+  "comment1": "Only one of sensor or timer should ever be true.",
+  "comment2": "days can be all, odd, or even.",
+  "sensor": false,
+  "dry": 20000,
+  "cooldown_min": 120,
+  "timer": true,
+  "when": "6:30AM",
+  "duration_sec": 120,
+  "days": "odd"
+}
