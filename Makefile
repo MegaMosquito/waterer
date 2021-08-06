@@ -2,7 +2,7 @@
 DOCKERHUB_ID:=ibmosquito
 NAME:=waterer
 VERSION:=1.0.0
-PORT:=80
+PORT:=8080
 
 # Some bits from https://github.com/MegaMosquito/netstuff/blob/master/Makefile
 LOCAL_DEFAULT_ROUTE     := $(shell sh -c "ip route | grep default")
@@ -45,11 +45,14 @@ exec:
 push:
 	docker push $(DOCKERHUB_ID)/$(NAME):$(VERSION)
 
+test:
+	curl -sS localhost:8080/status | jq .
+
 stop:
 	-docker rm -f $(NAME) 2>/dev/null || :
 
 clean: stop
 	-docker rmi $(DOCKERHUB_ID)/$(NAME):$(VERSION) 2>/dev/null || :
 
-.PHONY: all build dev run exec stop clean
+.PHONY: all build dev run exec stop test clean
 

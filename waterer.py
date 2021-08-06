@@ -32,7 +32,7 @@ from flask import Flask, request
 
 DEBUG_CONFIG = False
 DEBUG_LOG = False
-DEBUG_REST = False
+DEBUG_REST = True
 DEBUG_BUTTON = False
 DEBUG_NEXT = False
 DEBUG_SENSOR = False
@@ -48,11 +48,11 @@ def debug(flag, str):
 # ***** Flask *****
 
 # For development of the web UI, you can disable the REST API to only log
-DISABLE_REST_ACTIONS = False
+DISABLE_REST_ACTIONS = True
 
 # Flask server details
 BIND_ADDRESS = '0.0.0.0'
-BIND_PORT = 80
+BIND_PORT = 8080
 webapp = Flask('waterer')
 
 def server_thread():
