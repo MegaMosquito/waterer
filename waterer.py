@@ -12,6 +12,7 @@
 
 
 import os
+import sys
 import json
 import time
 from datetime import datetime, timedelta
@@ -26,13 +27,14 @@ import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 import RPi.GPIO as GPIO
 from flask import Flask, request
+from flask_cors import CORS, cross_origin
 
 
 # *** Debug ***
 
 DEBUG_CONFIG = False
 DEBUG_LOG = False
-DEBUG_REST = True
+DEBUG_REST = False
 DEBUG_BUTTON = False
 DEBUG_NEXT = False
 DEBUG_SENSOR = False
@@ -43,17 +45,20 @@ DEBUG_WATERING = False
 def debug(flag, str):
   if flag:
     print(str)
+    sys.stdout.flush()
 
 
 # ***** Flask *****
 
 # For development of the web UI, you can disable the REST API to only log
-DISABLE_REST_ACTIONS = True
+DISABLE_REST_ACTIONS = False
 
 # Flask server details
 BIND_ADDRESS = '0.0.0.0'
 BIND_PORT = 8080
 webapp = Flask('waterer')
+CORS(webapp)
+CORS_DOMAINS=['http://192.168.123.98', 'http://waterer.local']
 
 def server_thread():
   webapp.run(host=BIND_ADDRESS, port=BIND_PORT)
@@ -99,11 +104,11 @@ def save_config():
   f.close()
 
 # Update the config from the web UI
-def update_config(sensor, dry, cooldown_min, timer, when, duration_sec, days):
+def update_config(sensor, dry_percent, cooldown_min, timer, when, duration_sec, days):
   global config
   config_str = '{'
   config_str += '"sensor":' + sensor + ',' 
-  config_str += '"dry":' + str(dry) + ','
+  config_str += '"dry_percent":' + str(dry_percent) + ','
   config_str += '"cooldown_min":' + str(cooldown_min) + ','
   config_str += '"timer":' + timer + ',' 
   config_str += '"when":"' + str(when) + '",'
@@ -223,9 +228,10 @@ def text_centered_y(y, text):
   draw.text((oled.width//2 - font_width//2, y), text, font=font, fill=255)
 
 
-# ***** web UI *****
+# ***** REST API *****
 
 @webapp.route('/status', methods=['GET'])
+@cross_origin(origins=CORS_DOMAINS)
 def rest_status():
   json_data = '{'
   json_data += '"startup":"' + startup + '",'
@@ -235,37 +241,50 @@ def rest_status():
   json_data += '"timer":"' + str(config['timer']) + '",'
   if config['timer']:
     json_data += '"next":"' + get_next_timer_str(datetime.now()) + '",'
-  json_data += '"status":"running"'
+  mode = 'Manual'
+  if config['sensor'] or config['timer']:
+    mode = 'Automatic'
+  json_data += '"mode":"' + mode + '",'
+  watering_str = '"watering":"(no)"'
+  if watering:
+    duration = str(int(time.perf_counter() - watering_start))
+    watering_str = '"watering":"' + str(duration) + 'sec"'
+  json_data += watering_str + ','
+  json_data += '"now":"' + datetime.now().strftime('%d/%m/%Y %I:%M%p') + '"'
   json_data += '}'
   print(json_data + '\n')
   return (json_data + '\n', 200)
 
 @webapp.route('/config', methods=['GET', 'POST'])
+@cross_origin(origins=CORS_DOMAINS,allow_headers=['Content-Type'])
 def rest_config():
   if request.method == 'GET':
     json_data = json.dumps(config)
     return (json_data + '\n', 200)
   else: # method == POST
+    debug(DEBUG_REST, 'REST: "/config" POST')
+    debug(DEBUG_REST, '--> FORM:' + str(request.form))
     sensor = request.form['sensor']
-    dry = request.form['dry']
+    dry_percent = request.form['dry_percent']
     cooldown_min = request.form['cooldown_min']
     timer = request.form['timer']
     when = request.form['when']
     duration_sec = request.form['duration_sec']
     days = request.form['days']
-    debug(DEBUG_REST, 'REST: "/config" POST')
-    debug(DEBUG_REST, '  dry="' + dry + '"')
+    debug(DEBUG_REST, '  sensor="' + sensor + '"')
+    debug(DEBUG_REST, '  dry_percent="' + dry_percent + '"')
     debug(DEBUG_REST, '  cooldown_min="' + cooldown_min + '"')
     debug(DEBUG_REST, '  timer="' + timer + '"')
     debug(DEBUG_REST, '  when="' + when + '"')
     debug(DEBUG_REST, '  duration_sec="' + duration_sec + '"')
     debug(DEBUG_REST, '  days="' + days + '"')
     if not DISABLE_REST_ACTIONS:
-      update_config(sensor, dry, cooldown_min, timer, when, duration_sec, days)
+      update_config(sensor, dry_percent, cooldown_min, timer, when, duration_sec, days)
     json_data = json.dumps(config)
     return (json_data + '\n', 200)
 
 @webapp.route('/water', methods=['POST'])
+@cross_origin(origins=CORS_DOMAINS,allow_headers=['Content-Type'])
 def rest_water():
   action = request.form['action']
   debug(DEBUG_REST, 'REST: "/water" POST action=' + action)
@@ -283,6 +302,7 @@ def rest_water():
   return (json_data + '\n', 400)
 
 @webapp.route('/logs', methods=['GET', 'DELETE'])
+@cross_origin(origins=CORS_DOMAINS)
 def rest_logs():
   if request.method == 'GET':
     json_data = log2json()
@@ -294,7 +314,7 @@ def rest_logs():
     json_data = log2json()
     return (json_data + '\n', 200)
 
-# Prevent caching everywhere
+# Prevent caching everywhere, and allow CORS from 192.168.123.98
 @webapp.after_request
 def add_header(r):
   r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -330,8 +350,8 @@ def get_next_sensor_str():
   sensor = config['sensor']
   if not sensor:
     return ''
-  dry = config['dry']
-  return 'when moisture < ' + str(int(100 * (dry / 65535.0))) + '%'
+  dry_percent = config['dry_percent']
+  return 'when moisture < ' + str(dry_percent) + '%'
 
 # When is the next timed watering event?
 def get_next_timer(now):
@@ -423,7 +443,9 @@ while (True):
   # Does the sensor think we should we be watering right now?
   sensor = config['sensor']
   if sensor and not watering:
-    if moisture.value <= config['dry']:
+    dry = int((65535.0 * config['dry_percent']) / 100.0)
+    debug(DEBUG_SENSOR, "Dry == " + str(dry))
+    if moisture.value <= dry:
       debug(DEBUG_SENSOR, "Sensor is DRY!")
       cooldown_min = config['cooldown_min']
       earliest = last_sensor_watering + timedelta(minutes=cooldown_min)
@@ -481,8 +503,11 @@ while (True):
     text_centered_y(30, 'WATERING: ' + duration + 's')
   else:
     # Otherwise, give info about the next watering event (sensor or timer)
+    s = get_next_sensor_str() + get_next_timer_str(now)
+    if '' == s:
+      s = '(only manual)'
     text_xy(0, 30, 'Next watering:')
-    text_xy(0, 40, '  ' + get_next_sensor_str() + get_next_timer_str(now))
+    text_xy(0, 40, '  ' + s)
     text_xy(0, 50, ' ')
 
   # And finish up the display with the moisture sensor output

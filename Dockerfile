@@ -20,6 +20,7 @@ RUN apk add --update \
 RUN pip3 install \
   RPi.GPIO \
   flask \
+  flask-cors \
   adafruit-circuitpython-mcp3xxx
 
 COPY waterer.py /
