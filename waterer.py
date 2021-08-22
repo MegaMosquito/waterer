@@ -82,9 +82,6 @@ LOCAL_IP_ADDRESS      = os.environ['LOCAL_IP_ADDRESS']
 # Where is the config file located?
 CONFIG_FILE = '/config.json'
 
-# Where is the log file located?
-LOG_FILE = '/log.json'
-
 # Load the configuration from disk
 def load_config():
   global config
@@ -125,6 +122,9 @@ load_config()
 
 
 # ***** Logfile *****
+
+# Where is the log file located?
+LOG_FILE = '/log.json'
 
 def log(s):
   debug(DEBUG_LOG, 'Writing: "' + s + '"')
